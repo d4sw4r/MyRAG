@@ -3,7 +3,7 @@
 Eigenes RAG-System (Retrieval-Augmented Generation): Ein Ordner wird eingelesen,
 die Dateien werden indexiert und können anschließend mit einer KI befragt werden.
 
-> **Status:** v0.1.0. `ingest` funktioniert, `ask` ist noch ein Platzhalter.
+> **Status:** v0.1.0. `ingest` und `ask` funktionieren.
 
 ## Installation
 
@@ -36,6 +36,22 @@ Alternativ ohne Installation: `python -m myrag ...` (mit `PYTHONPATH=src`).
   `source` (relativer Pfad), `chunk_index` und `file_hash`.
 - Eine fehlerhafte Datei bricht den Lauf nicht ab, sie wird am Ende gemeldet.
 
+## Fragen stellen (`myrag ask`)
+
+- Die Frage wird mit demselben Embedding-Modell eingebettet wie beim Einlesen,
+  dann holt `ask` die passendsten Chunks (Standard 5, änderbar mit `-k`) aus ChromaDB.
+- Die Chunks gehen nummeriert als Auszüge an das Sprachmodell. Es antwortet nur
+  anhand dieser Auszüge und belegt Aussagen mit `[1]`, `[2]` usw.
+- Unter der Antwort steht die Quellenliste mit Dateipfad und Abschnitt.
+- Standard ist die Claude-API (`ANTHROPIC_API_KEY` setzen). Lokal geht es mit
+  `MYRAG_LLM=ollama` (vorher z. B. `ollama pull llama3.1`).
+
+```bash
+export ANTHROPIC_API_KEY=...
+myrag ask "Wie lange schlafen Katzen?"
+MYRAG_LLM=ollama MYRAG_MODEL=qwen2.5 myrag ask "Wie lange schlafen Katzen?"
+```
+
 ## Konfiguration (Umgebungsvariablen)
 
 | Variable            | Standard                  | Bedeutung                          |
@@ -43,7 +59,7 @@ Alternativ ohne Installation: `python -m myrag ...` (mit `PYTHONPATH=src`).
 | `MYRAG_DB_PATH`     | `./.myrag/chroma`         | Speicherort des Index              |
 | `MYRAG_EMBED_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | Embedding-Modell (ingest und ask) |
 | `MYRAG_LLM`         | `claude`                  | `claude` oder `ollama`             |
-| `MYRAG_MODEL`       | (je nach LLM)             | Modellname                         |
+| `MYRAG_MODEL`       | `claude-opus-5-5` bzw. `llama3.1` | Modellname                 |
 | `ANTHROPIC_API_KEY` | –                         | API-Schlüssel für Claude           |
 | `OLLAMA_HOST`       | `http://localhost:11434`  | Adresse eines lokalen Ollama       |
 
@@ -58,13 +74,13 @@ src/myrag/
   chunking.py # Text in überlappende Chunks teilen
   embeddings.py # gemeinsames Embedding-Modell für ingest und ask
   store.py    # ChromaDB-Zugriff (get_collection)
-  ask.py      # Frage -> Fundstellen -> LLM-Antwort (Platzhalter)
+  ask.py      # Frage -> Fundstellen -> LLM-Antwort mit Quellen
+  llm.py      # Sprachmodelle: Claude-API und Ollama
 tests/
 ```
 
-## Geplant / Annahmen
+## Annahmen
 
-- **Antworten:** Claude-API oder lokal per Ollama, umschaltbar über `MYRAG_LLM`.
 - Der Index liegt standardmäßig unter `./.myrag/chroma` im aktuellen Verzeichnis.
 
 ## Tests
