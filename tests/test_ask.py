@@ -131,15 +131,78 @@ def test_claude_uses_stream_and_text_blocks():
     assert captured["system"] == "sys"
 
 
-def test_run_uses_store_and_embedder(collection, monkeypatch, capsys):
-    import sys, types
-    from myrag import ask as ask_mod
+def _patch_embedder(monkeypatch):
+    import types
+    monkeypatch.setattr("myrag.embeddings.get_embedder", lambda *a: types.SimpleNamespace(embed_query=vec))
 
-    monkeypatch.setitem(sys.modules, "myrag.store", types.SimpleNamespace(get_collection=lambda p: collection))
-    monkeypatch.setitem(sys.modules, "myrag.embeddings", types.SimpleNamespace(
-        get_embedder=lambda: types.SimpleNamespace(embed_query=vec)))
+
+def test_run_uses_store_and_embedder(tmp_path, monkeypatch, capsys):
+    import types
+    from myrag import ask as ask_mod, store
+
+    col = store.get_collection(tmp_path / "db")
+    texts = ["Katzen schlafen viel", "Rezept für Pizza mit Tomaten"]
+    for i, t in enumerate(texts):
+        store.add_chunks(col, f"notes/{i}.md", "h", [t], [vec(t)], root="/docs")
+    _patch_embedder(monkeypatch)
     monkeypatch.setattr("myrag.llm.get_llm", lambda *a: FakeLLM())
-    cfg = types.SimpleNamespace(db_path="x", llm="claude", model=None, ollama_host=None)
+    cfg = types.SimpleNamespace(db_path=tmp_path / "db", llm="claude", model=None, ollama_host=None)
     assert ask_mod.run("Pizza Tomaten", cfg, top_k=1) == 0
     out = capsys.readouterr().out
     assert "[1] notes/1.md" in out
+
+
+def test_run_without_index(tmp_path, monkeypatch, capsys):
+    import types
+    from myrag import ask as ask_mod
+
+    monkeypatch.setattr("myrag.llm.get_llm", lambda *a: FakeLLM())
+    cfg = types.SimpleNamespace(db_path=tmp_path / "fehlt", llm="claude", model=None, ollama_host=None)
+    assert ask_mod.run("x", cfg) == 1
+    assert "myrag ingest" in capsys.readouterr().err
+    assert not (tmp_path / "fehlt").exists()
+
+
+def test_run_empty_index_skips_embedder(tmp_path, monkeypatch, capsys):
+    import types
+    from myrag import ask as ask_mod, store
+
+    store.get_collection(tmp_path / "db")
+
+    def boom(*a):
+        raise AssertionError("Embedder darf nicht geladen werden")
+
+    monkeypatch.setattr("myrag.embeddings.get_embedder", boom)
+    monkeypatch.setattr("myrag.llm.get_llm", lambda *a: FakeLLM())
+    cfg = types.SimpleNamespace(db_path=tmp_path / "db", llm="claude", model=None, ollama_host=None)
+    assert ask_mod.run("x", cfg) == 1
+    assert "leer" in capsys.readouterr().err
+
+
+def test_missing_api_key(monkeypatch, tmp_path):
+    from myrag.llm import LLMError
+
+    for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    with pytest.raises(LLMError, match="ANTHROPIC_API_KEY"):
+        ClaudeLLM()
+
+
+def test_claude_auth_error_is_readable():
+    import anthropic
+    from myrag.llm import LLMError
+
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    err = anthropic.AuthenticationError("bad key", response=httpx.Response(401, request=req), body=None)
+
+    class Messages:
+        def stream(self, **kw):
+            raise err
+
+    class Client:
+        class beta:
+            messages = Messages()
+
+    with pytest.raises(LLMError, match="ungültig"):
+        ClaudeLLM(client=Client()).generate("s", "p")

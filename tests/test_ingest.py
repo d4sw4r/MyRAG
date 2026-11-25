@@ -113,3 +113,31 @@ def test_broken_file_does_not_abort(tmp_path: Path):
     col = store.get_collection(tmp_path / "db")
     r = ingest_folder(docs, col, FakeEmbedder())
     assert "kaputt.pdf" in r.failed and r.added == ["ok.txt"]
+
+
+def test_two_folders_share_index(tmp_path: Path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir(); b.mkdir()
+    (a / "README.md").write_text("Ordner A")
+    (b / "README.md").write_text("Ordner B")
+    col = store.get_collection(tmp_path / "db")
+    emb = FakeEmbedder()
+    ingest_folder(a, col, emb)
+    r = ingest_folder(b, col, emb)
+    # B einlesen darf A nicht entfernen, gleicher Dateiname kollidiert nicht
+    assert r.added == ["README.md"] and r.removed == []
+    assert sorted(col.get()["documents"]) == ["Ordner A", "Ordner B"]
+    stats = store.stats(col)
+    assert stats == {str(a.resolve()): {"files": 1, "chunks": 1}, str(b.resolve()): {"files": 1, "chunks": 1}}
+    # Datei in B löschen entfernt nur B
+    (b / "README.md").unlink()
+    r = ingest_folder(b, col, emb)
+    assert r.removed == ["README.md"] and col.get()["documents"] == ["Ordner A"]
+
+
+def test_empty_file_reported(tmp_path: Path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "leer.txt").write_text("   ")
+    r = ingest_folder(docs, store.get_collection(tmp_path / "db"), FakeEmbedder())
+    assert r.empty == ["leer.txt"] and r.added == [] and "ohne Text" in r.summary()

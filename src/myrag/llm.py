@@ -14,6 +14,19 @@ DEFAULT_MODELS = {
 }
 
 
+class LLMError(RuntimeError):
+    """Verständliche Fehlermeldung für die Kommandozeile."""
+
+
+def _has_anthropic_credentials() -> bool:
+    if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+        return True
+    if os.environ.get("ANTHROPIC_PROFILE"):
+        return True
+    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.isdir(os.path.join(config_home, "anthropic"))
+
+
 class LLM(Protocol):
     name: str
     model: str
@@ -28,12 +41,36 @@ class ClaudeLLM:
         self.model = model or DEFAULT_MODELS["claude"]
         self.max_tokens = max_tokens
         if client is None:
+            if not _has_anthropic_credentials():
+                raise LLMError(
+                    "Kein Claude-API-Schlüssel gefunden. Setze ANTHROPIC_API_KEY "
+                    "(Schlüssel unter https://platform.claude.com/settings/keys) "
+                    "oder nutze ein lokales Modell mit MYRAG_LLM=ollama."
+                )
             import anthropic
 
             client = anthropic.Anthropic()
         self.client = client
 
     def generate(self, system: str, prompt: str) -> str:
+        import anthropic
+
+        try:
+            return self._generate(system, prompt)
+        except anthropic.AuthenticationError as e:
+            raise LLMError("Der Claude-API-Schlüssel ist ungültig. Prüfe ANTHROPIC_API_KEY.") from e
+        except anthropic.PermissionDeniedError as e:
+            raise LLMError(f"Kein Zugriff auf das Modell {self.model}: {e.message}") from e
+        except anthropic.NotFoundError as e:
+            raise LLMError(f"Modell {self.model} nicht gefunden. Prüfe MYRAG_MODEL.") from e
+        except anthropic.RateLimitError as e:
+            raise LLMError("Rate-Limit der Claude-API erreicht. Bitte kurz warten und erneut fragen.") from e
+        except anthropic.APIStatusError as e:
+            raise LLMError(f"Claude-API-Fehler ({e.status_code}): {e.message}") from e
+        except anthropic.APIConnectionError as e:
+            raise LLMError("Claude-API nicht erreichbar. Besteht eine Internetverbindung?") from e
+
+    def _generate(self, system: str, prompt: str) -> str:
         with self.client.beta.messages.stream(
             model=self.model,
             max_tokens=self.max_tokens,
@@ -47,7 +84,7 @@ class ClaudeLLM:
         ) as stream:
             message = stream.get_final_message()
         if message.stop_reason == "refusal":
-            raise RuntimeError("Das Modell hat die Anfrage abgelehnt.")
+            raise LLMError("Das Modell hat die Anfrage abgelehnt.")
         return "".join(b.text for b in message.content if b.type == "text").strip()
 
 
@@ -75,11 +112,11 @@ class OllamaLLM:
                 },
             )
         except httpx.ConnectError as e:
-            raise RuntimeError(
+            raise LLMError(
                 f"Ollama ist unter {self.host} nicht erreichbar. Läuft `ollama serve`?"
             ) from e
         if resp.status_code == 404:
-            raise RuntimeError(
+            raise LLMError(
                 f"Ollama-Modell '{self.model}' nicht gefunden. Lade es mit `ollama pull {self.model}`."
             )
         resp.raise_for_status()

@@ -1,0 +1,33 @@
+"""`myrag status`: Überblick über Index und Konfiguration."""
+
+from __future__ import annotations
+
+from . import store
+from .embeddings import model_name_from_env
+from .llm import DEFAULT_MODELS, _has_anthropic_credentials
+
+
+def run(config) -> int:
+    print(f"Index:            {config.db_path.resolve()}")
+    print(f"Embedding-Modell:  {model_name_from_env()}")
+    model = config.model or DEFAULT_MODELS.get(config.llm, "?")
+    line = f"Sprachmodell:      {config.llm} ({model})"
+    if config.llm == "claude":
+        line += ", API-Schlüssel " + ("gefunden" if _has_anthropic_credentials() else "FEHLT (ANTHROPIC_API_KEY)")
+    elif config.llm == "ollama":
+        line += f", {config.ollama_host}"
+    print(line)
+
+    if not store.index_exists(config.db_path):
+        print("\nDer Index ist noch leer. Starte mit: myrag ingest <ordner>")
+        return 0
+    stats = store.stats(store.get_collection(config.db_path))
+    if not stats:
+        print("\nDer Index ist noch leer. Starte mit: myrag ingest <ordner>")
+        return 0
+    files = sum(s["files"] for s in stats.values())
+    chunks = sum(s["chunks"] for s in stats.values())
+    print(f"\n{files} Dateien, {chunks} Chunks in {len(stats)} Ordner(n):")
+    for root, s in stats.items():
+        print(f"  {root}: {s['files']} Dateien, {s['chunks']} Chunks")
+    return 0
