@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "myrag"
 version = "0.1.0"
-description = "Eigenes RAG-System: Ordner einlesen, Dateien indexieren, mit KI befragen."
+description = "Personal RAG system: ingest a folder, index its files, query them with AI."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

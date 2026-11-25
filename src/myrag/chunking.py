@@ -1,4 +1,4 @@
-"""Text in überlappende Chunks teilen."""
+"""Split text into overlapping chunks."""
 
 from __future__ import annotations
 
@@ -11,15 +11,15 @@ def chunk_text(
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     overlap: int = DEFAULT_CHUNK_OVERLAP,
 ) -> list[str]:
-    """Teilt text in Stücke von höchstens chunk_size Zeichen.
+    """Split text into pieces of at most chunk_size characters.
 
-    Aufeinanderfolgende Chunks überlappen um etwa overlap Zeichen. Geschnitten
-    wird bevorzugt an Absatz-, Satz- oder Wortgrenzen.
+    Consecutive chunks overlap by roughly overlap characters. Cuts are made
+    preferably at paragraph, sentence or word boundaries.
     """
     if chunk_size <= 0:
-        raise ValueError("chunk_size muss > 0 sein")
+        raise ValueError("chunk_size must be > 0")
     if not 0 <= overlap < chunk_size:
-        raise ValueError("overlap muss >= 0 und < chunk_size sein")
+        raise ValueError("overlap must be >= 0 and < chunk_size")
 
     text = text.strip()
     if not text:
@@ -37,7 +37,7 @@ def chunk_text(
         if end >= n:
             break
         next_start = max(end - overlap, start + 1)
-        # Überlappung an einer Wortgrenze beginnen lassen
+        # start the overlap at a word boundary
         space = text.find(" ", next_start, end)
         if space != -1:
             next_start = space + 1
@@ -46,7 +46,7 @@ def chunk_text(
 
 
 def _best_break(text: str, start: int, end: int) -> int:
-    """Sucht im hinteren Teil des Fensters die beste Schnittstelle."""
+    """Find the best cut position in the back half of the window."""
     min_pos = start + (end - start) // 2
     for sep in ("\n\n", "\n", ". ", "! ", "? ", " "):
         pos = text.rfind(sep, min_pos, end)

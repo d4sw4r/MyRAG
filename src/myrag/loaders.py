@@ -1,4 +1,4 @@
-"""Dateien finden und als Text laden (.txt, .md, .pdf, .docx)."""
+"""Find files and load them as text (.txt, .md, .pdf, .docx)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ SKIP_DIRS = {".git", ".myrag", "__pycache__", "node_modules", ".venv", "venv"}
 
 
 def iter_files(root: Path) -> Iterator[Path]:
-    """Alle unterstützten Dateien unter root, rekursiv und sortiert."""
+    """All supported files under root, recursive and sorted."""
     for path in sorted(root.rglob("*")):
         rel_parts = path.relative_to(root).parts
         if any(p in SKIP_DIRS or p.startswith(".") for p in rel_parts):
@@ -36,7 +36,7 @@ def load_text(path: Path) -> str:
         return _read_pdf(path)
     if suffix == ".docx":
         return _read_docx(path)
-    raise ValueError(f"Nicht unterstützter Dateityp: {path.suffix}")
+    raise ValueError(f"Unsupported file type: {path.suffix}")
 
 
 def _read_plain(path: Path) -> str:

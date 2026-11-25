@@ -21,7 +21,7 @@ class FakeLLM:
 
 
 def vec(text):
-    # Mini-Embedding: Buchstabenhäufigkeit, reicht für deterministische Tests.
+    # Tiny embedding: letter frequencies, good enough for deterministic tests.
     v = [0.0] * 26
     for c in text.lower():
         if "a" <= c <= "z":
@@ -52,10 +52,10 @@ def test_ask_passes_numbered_sources_to_llm(collection):
     llm = FakeLLM()
     answer = ask("Pizza Tomaten Rezept", collection, llm, k=2, embed=vec)
     _, prompt = llm.calls[0]
-    assert "[1] Quelle: notes/1.md" in prompt
-    assert "Frage: Pizza Tomaten Rezept" in prompt
+    assert "[1] Source: notes/1.md" in prompt
+    assert "Question: Pizza Tomaten Rezept" in prompt
     out = format_answer(answer)
-    assert "Quellen:" in out and "[1] notes/1.md (Abschnitt 0)" in out
+    assert "Sources:" in out and "[1] notes/1.md (section 0)" in out
 
 
 def test_ask_empty_index():
@@ -170,13 +170,13 @@ def test_run_empty_index_skips_embedder(tmp_path, monkeypatch, capsys):
     store.get_collection(tmp_path / "db")
 
     def boom(*a):
-        raise AssertionError("Embedder darf nicht geladen werden")
+        raise AssertionError("embedder must not be loaded")
 
     monkeypatch.setattr("myrag.embeddings.get_embedder", boom)
     monkeypatch.setattr("myrag.llm.get_llm", lambda *a: FakeLLM())
     cfg = types.SimpleNamespace(db_path=tmp_path / "db", llm="claude", model=None, ollama_host=None)
     assert ask_mod.run("x", cfg) == 1
-    assert "leer" in capsys.readouterr().err
+    assert "empty" in capsys.readouterr().err
 
 
 def test_missing_api_key(monkeypatch, tmp_path):
@@ -204,5 +204,5 @@ def test_claude_auth_error_is_readable():
         class beta:
             messages = Messages()
 
-    with pytest.raises(LLMError, match="ungültig"):
+    with pytest.raises(LLMError, match="invalid"):
         ClaudeLLM(client=Client()).generate("s", "p")

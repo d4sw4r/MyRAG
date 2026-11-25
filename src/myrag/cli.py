@@ -1,4 +1,4 @@
-"""Kommandozeile: `myrag ingest`, `myrag ask`, `myrag status`, `myrag reset`."""
+"""Command line: `myrag ingest`, `myrag ask`, `myrag status`, `myrag reset`."""
 
 from __future__ import annotations
 
@@ -13,26 +13,26 @@ from .config import Config
 def _positive_int(value: str) -> int:
     n = int(value)
     if n < 1:
-        raise argparse.ArgumentTypeError("muss mindestens 1 sein")
+        raise argparse.ArgumentTypeError("must be at least 1")
     return n
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="myrag", description="Eigenes RAG: Ordner einlesen und mit KI befragen.")
+    parser = argparse.ArgumentParser(prog="myrag", description="Personal RAG: ingest a folder and query it with AI.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_ingest = sub.add_parser("ingest", help="Ordner einlesen und indexieren")
-    p_ingest.add_argument("folder", type=Path, help="Ordner, dessen Dateien aufgenommen werden")
+    p_ingest = sub.add_parser("ingest", help="Ingest and index a folder")
+    p_ingest.add_argument("folder", type=Path, help="Folder whose files are added to the index")
 
-    p_ask = sub.add_parser("ask", help="Frage an die eingelesenen Dateien stellen")
-    p_ask.add_argument("question", help="Die Frage in Anführungszeichen")
-    p_ask.add_argument("-k", "--top-k", type=_positive_int, default=5, help="Anzahl der Fundstellen (Standard: 5)")
+    p_ask = sub.add_parser("ask", help="Ask a question about the ingested files")
+    p_ask.add_argument("question", help="The question, in quotes")
+    p_ask.add_argument("-k", "--top-k", type=_positive_int, default=5, help="Number of retrieved passages (default: 5)")
 
-    sub.add_parser("status", help="Zeigt, was im Index liegt und welches Modell antwortet")
+    sub.add_parser("status", help="Show what is in the index and which model answers")
 
-    p_reset = sub.add_parser("reset", help="Löscht den kompletten Index")
-    p_reset.add_argument("-y", "--yes", action="store_true", help="Ohne Rückfrage löschen")
+    p_reset = sub.add_parser("reset", help="Delete the entire index")
+    p_reset.add_argument("-y", "--yes", action="store_true", help="Delete without confirmation")
     return parser
 
 
@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "ingest":
         folder = args.folder.expanduser().resolve()
         if not folder.is_dir():
-            print(f"Fehler: {folder} ist kein Ordner.", file=sys.stderr)
+            print(f"Error: {folder} is not a folder.", file=sys.stderr)
             return 1
         from .ingest import run
         return run(folder, config)
@@ -66,15 +66,15 @@ def _reset(config: Config, yes: bool) -> int:
     from . import store
 
     if not store.index_exists(config.db_path):
-        print(f"Kein Index unter {config.db_path}, nichts zu tun.")
+        print(f"No index at {config.db_path}, nothing to do.")
         return 0
     if not yes:
-        answer = input(f"Index unter {config.db_path} wirklich löschen? [j/N] ").strip().lower()
+        answer = input(f"Really delete the index at {config.db_path}? [y/N] ").strip().lower()
         if answer not in {"j", "ja", "y", "yes"}:
-            print("Abgebrochen.")
+            print("Aborted.")
             return 1
     store.reset(config.db_path)
-    print(f"Index unter {config.db_path} gelöscht.")
+    print(f"Deleted the index at {config.db_path}.")
     return 0
 
 
