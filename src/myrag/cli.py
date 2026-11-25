@@ -1,4 +1,4 @@
-"""Command line: `myrag ingest`, `myrag ask`, `myrag status`, `myrag reset`."""
+"""Command line: `myrag ingest`, `ask`, `search`, `chat`, `status`, `reset`."""
 
 from __future__ import annotations
 
@@ -24,10 +24,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_ingest = sub.add_parser("ingest", help="Ingest and index a folder")
     p_ingest.add_argument("folder", type=Path, help="Folder whose files are added to the index")
+    p_ingest.add_argument("--rebuild", action="store_true",
+                          help="Delete the index and re-ingest all its folders (e.g. after changing the embedding model)")
 
     p_ask = sub.add_parser("ask", help="Ask a question about the ingested files")
     p_ask.add_argument("question", help="The question, in quotes")
     p_ask.add_argument("-k", "--top-k", type=_positive_int, default=5, help="Number of retrieved passages (default: 5)")
+
+    p_search = sub.add_parser("search", help="Show the best matching passages, without asking an AI")
+    p_search.add_argument("query", help="Search text, in quotes")
+    p_search.add_argument("-k", "--top-k", type=_positive_int, default=5, help="Number of passages (default: 5)")
+
+    p_chat = sub.add_parser("chat", help="Interactive chat with follow-up questions")
+    p_chat.add_argument("-k", "--top-k", type=_positive_int, default=5, help="Passages per question (default: 5)")
 
     sub.add_parser("status", help="Show what is in the index and which model answers")
 
@@ -46,11 +55,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Error: {folder} is not a folder.", file=sys.stderr)
             return 1
         from .ingest import run
-        return run(folder, config)
+        return run(folder, config, rebuild=args.rebuild)
 
     if args.command == "ask":
         from .ask import run
         return run(args.question, config, top_k=args.top_k)
+
+    if args.command == "search":
+        from .search import run
+        return run(args.query, config, top_k=args.top_k)
+
+    if args.command == "chat":
+        from .chat import run
+        return run(config, top_k=args.top_k)
 
     if args.command == "status":
         from .status import run

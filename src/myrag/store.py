@@ -13,12 +13,14 @@ no embedding_function of its own; embeddings are always passed explicitly
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 from pathlib import Path
 
 DEFAULT_DB_PATH = Path(".myrag") / "chroma"
 COLLECTION_NAME = "myrag"
+INDEX_INFO_FILE = "myrag_index.json"
 _PAGE = 5000
 
 
@@ -60,6 +62,46 @@ def reset(db_path: str | Path | None = None) -> bool:
     return True
 
 
+def read_index_info(db_path: str | Path | None = None) -> dict | None:
+    """Settings the index was built with, e.g. {"embed_model": ...}; None if unknown."""
+    path = (Path(db_path) if db_path is not None else db_path_from_env()) / INDEX_INFO_FILE
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def write_index_info(info: dict, db_path: str | Path | None = None) -> None:
+    path = Path(db_path) if db_path is not None else db_path_from_env()
+    path.mkdir(parents=True, exist_ok=True)
+    (path / INDEX_INFO_FILE).write_text(json.dumps(info, indent=2), encoding="utf-8")
+
+
+def index_embed_model(collection, db_path: str | Path | None = None) -> str | None:
+    """Embedding model the index was built with.
+
+    Indexes from v0.1 have no info file; if they contain chunks they were built
+    with the old default model. An empty index has no model yet (None).
+    """
+    info = read_index_info(db_path)
+    if info and info.get("embed_model"):
+        return info["embed_model"]
+    if collection.count() > 0:
+        from .embeddings import LEGACY_MODEL
+
+        return LEGACY_MODEL
+    return None
+
+
+def model_mismatch_message(index_model: str, current_model: str) -> str:
+    return (
+        f"The index was built with the embedding model '{index_model}', but the current "
+        f"model is '{current_model}'. Their vectors are not compatible. Either run "
+        f"`myrag ingest --rebuild <folder>` to re-embed everything, or set "
+        f"MYRAG_EMBED_MODEL={index_model}."
+    )
+
+
 def root_key(root: str) -> str:
     return hashlib.sha256(root.encode()).hexdigest()[:12]
 
@@ -90,10 +132,37 @@ def iter_metadatas(collection, root: str | None = None):
         offset += _PAGE
 
 
+def iter_chunks(collection):
+    """Yield (id, document, metadata) for every chunk in the index."""
+    offset = 0
+    while True:
+        got = collection.get(include=["documents", "metadatas"], limit=_PAGE, offset=offset)
+        ids = got.get("ids") or []
+        docs = got.get("documents") or [None] * len(ids)
+        metas = got.get("metadatas") or [None] * len(ids)
+        yield from zip(ids, docs, (m or {} for m in metas))
+        if len(ids) < _PAGE:
+            return
+        offset += _PAGE
+
+
 def indexed_files(collection, root: str | None = None) -> dict[str, str]:
     """Return {source: file_hash} of the indexed files (optionally of one folder only)."""
     return {
         m["source"]: m.get("file_hash", "")
+        for m in iter_metadatas(collection, root)
+        if "source" in m
+    }
+
+
+LEGACY_CHUNKING = "1000/200"
+
+
+def indexed_versions(collection, root: str | None = None) -> dict[str, str]:
+    """{source: "<file_hash>|<chunk_size>/<overlap>"}; a file whose version differs
+    from the current one (content or chunk settings changed) is re-processed."""
+    return {
+        m["source"]: f"{m.get('file_hash', '')}|{m.get('chunking', LEGACY_CHUNKING)}"
         for m in iter_metadatas(collection, root)
         if "source" in m
     }
@@ -121,10 +190,13 @@ def add_chunks(
     chunks: list[str],
     embeddings: list[list[float]],
     root: str | None = None,
+    chunking: str | None = None,
 ) -> None:
     if not chunks:
         return
     meta = {"source": source, "file_hash": file_hash}
+    if chunking:
+        meta["chunking"] = chunking
     if root:
         meta["root"] = root
     collection.add(

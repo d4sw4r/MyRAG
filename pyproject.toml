@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "myrag"
-version = "0.1.0"
+version = "0.2.0"
 description = "Personal RAG system: ingest a folder, index its files, query them with AI."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,6 +15,9 @@ dependencies = [
     "sentence-transformers>=3.0",
     "pypdf>=4.0",
     "python-docx>=1.1",
+    "python-pptx>=1.0",
+    "openpyxl>=3.1",
+    "beautifulsoup4>=4.12",
 ]
 
 [project.optional-dependencies]
