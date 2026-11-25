@@ -9,7 +9,7 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Config:
-    # ANNAHME: Index liegt standardmäßig in ~/.myrag/ (pro Benutzer, nicht pro Ordner).
+    # ANNAHME: Index liegt standardmäßig in ./.myrag/chroma (im aktuellen Verzeichnis).
     db_path: Path
     llm: str  # "claude" | "ollama"
     model: str | None
@@ -18,7 +18,7 @@ class Config:
     @classmethod
     def from_env(cls) -> "Config":
         return cls(
-            db_path=Path(os.environ.get("MYRAG_DB_PATH", Path.home() / ".myrag" / "db")).expanduser(),
+            db_path=Path(os.environ.get("MYRAG_DB_PATH", ".myrag/chroma")).expanduser(),
             llm=os.environ.get("MYRAG_LLM", "claude"),
             model=os.environ.get("MYRAG_MODEL") or None,
             ollama_host=os.environ.get("OLLAMA_HOST", "http://localhost:11434"),

@@ -28,7 +28,7 @@ Alternativ ohne Installation: `python -m myrag ...` (mit `PYTHONPATH=src`).
 
 | Variable            | Standard                  | Bedeutung                          |
 |---------------------|---------------------------|------------------------------------|
-| `MYRAG_DB_PATH`     | `~/.myrag/db`             | Speicherort des Index              |
+| `MYRAG_DB_PATH`     | `./.myrag/chroma`         | Speicherort des Index              |
 | `MYRAG_LLM`         | `claude`                  | `claude` oder `ollama`             |
 | `MYRAG_MODEL`       | (je nach LLM)             | Modellname                         |
 | `ANTHROPIC_API_KEY` | –                         | API-Schlüssel für Claude           |
@@ -51,7 +51,7 @@ tests/
   Hash-Cache, damit unveränderte Dateien nicht neu eingelesen werden.
 - **Suche:** lokale Embeddings (sentence-transformers) mit ChromaDB.
 - **Antworten:** Claude-API oder lokal per Ollama, umschaltbar über `MYRAG_LLM`.
-- Der Index liegt pro Benutzer unter `~/.myrag/`, nicht im eingelesenen Ordner.
+- Der Index liegt standardmäßig unter `./.myrag/chroma` im aktuellen Verzeichnis.
 
 ## Tests
 
