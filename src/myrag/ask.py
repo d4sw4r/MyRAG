@@ -68,10 +68,15 @@ def build_prompt(question: str, hits: list[Hit]) -> str:
     return "Auszüge:\n\n" + "\n\n---\n\n".join(parts) + f"\n\nFrage: {question}"
 
 
+EMPTY_INDEX = "Der Index ist leer. Lies zuerst einen Ordner ein: myrag ingest <ordner>"
+
+
 def ask(question: str, collection, llm: LLM, k: int = 5, embed=None) -> Answer:
-    hits = retrieve(collection, question, k=k, embed=embed)
+    if collection.count() == 0:
+        return Answer(EMPTY_INDEX, [])
+    hits = retrieve(collection, question, k=min(k, collection.count()), embed=embed)
     if not hits:
-        return Answer("Im Index wurde nichts gefunden. Hast du schon `myrag ingest` ausgeführt?", [])
+        return Answer("Im Index wurde nichts Passendes gefunden.", [])
     return Answer(llm.generate(SYSTEM_PROMPT, build_prompt(question, hits)), hits)
 
 
@@ -87,15 +92,21 @@ def run(question: str, config, top_k: int = 5) -> int:
     """Einstieg für `myrag ask`: sucht, fragt das Sprachmodell und gibt die Antwort aus."""
     import sys
 
+    from myrag import store
     from myrag.embeddings import get_embedder
-    from myrag.llm import get_llm
-    from myrag.store import get_collection
+    from myrag.llm import LLMError, get_llm
 
+    if not store.index_exists(config.db_path):
+        print(f"Fehler: Kein Index unter {config.db_path}. {EMPTY_INDEX}", file=sys.stderr)
+        return 1
     try:
         llm = get_llm(config.llm, config.model, getattr(config, "ollama_host", None))
-        collection = get_collection(config.db_path)
+        collection = store.get_collection(config.db_path)
+        if collection.count() == 0:  # Embedding-Modell gar nicht erst laden
+            print(f"Fehler: {EMPTY_INDEX}", file=sys.stderr)
+            return 1
         answer = ask(question, collection, llm, k=top_k, embed=get_embedder().embed_query)
-    except (RuntimeError, ValueError) as e:
+    except (LLMError, RuntimeError, ValueError) as e:
         print(f"Fehler: {e}", file=sys.stderr)
         return 1
     print(format_answer(answer))
