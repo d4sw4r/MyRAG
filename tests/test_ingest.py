@@ -31,7 +31,7 @@ def test_chunk_overlap_and_size():
     assert len(chunks) > 1
     assert all(len(c) <= 200 for c in chunks)
     for a, b in zip(chunks, chunks[1:]):
-        assert b.split()[0] in a  # Überlappung vorhanden
+        assert b.split()[0] in a  # overlap present
 
 
 def test_chunk_empty_and_short():
@@ -85,13 +85,13 @@ def test_incremental_ingest(tmp_path: Path):
     meta = col.get(where={"source": "b.md"}, include=["metadatas"])["metadatas"][0]
     assert meta["chunk_index"] == 0 and len(meta["file_hash"]) == 64
 
-    # zweiter Lauf: nichts geändert -> keine Embeddings
+    # second run: nothing changed -> no embeddings
     calls = emb.calls
     r2 = ingest_folder(docs, col, emb, chunk_size=300, overlap=50)
     assert sorted(r2.unchanged) == ["a.txt", "b.md"] and emb.calls == calls
     assert col.count() == total
 
-    # Datei ändern (kürzer), neue hinzufügen, eine löschen
+    # change a file (shorter), add a new one, delete one
     (docs / "a.txt").write_text("Jetzt kurz")
     (docs / "c.txt").write_text("Neu")
     (docs / "b.md").unlink()
@@ -101,7 +101,7 @@ def test_incremental_ingest(tmp_path: Path):
     assert sorted(m["source"] for m in got["metadatas"]) == ["a.txt", "c.txt"]
     assert "Jetzt kurz" in got["documents"]
 
-    # Persistenz: neue Collection-Instanz sieht dieselben Daten
+    # persistence: a new collection instance sees the same data
     assert store.get_collection(tmp_path / "db").count() == 2
 
 
@@ -124,12 +124,12 @@ def test_two_folders_share_index(tmp_path: Path):
     emb = FakeEmbedder()
     ingest_folder(a, col, emb)
     r = ingest_folder(b, col, emb)
-    # B einlesen darf A nicht entfernen, gleicher Dateiname kollidiert nicht
+    # ingesting B must not remove A; the same file name does not collide
     assert r.added == ["README.md"] and r.removed == []
     assert sorted(col.get()["documents"]) == ["Ordner A", "Ordner B"]
     stats = store.stats(col)
     assert stats == {str(a.resolve()): {"files": 1, "chunks": 1}, str(b.resolve()): {"files": 1, "chunks": 1}}
-    # Datei in B löschen entfernt nur B
+    # deleting the file in B removes only B
     (b / "README.md").unlink()
     r = ingest_folder(b, col, emb)
     assert r.removed == ["README.md"] and col.get()["documents"] == ["Ordner A"]
@@ -140,4 +140,4 @@ def test_empty_file_reported(tmp_path: Path):
     docs.mkdir()
     (docs / "leer.txt").write_text("   ")
     r = ingest_folder(docs, store.get_collection(tmp_path / "db"), FakeEmbedder())
-    assert r.empty == ["leer.txt"] and r.added == [] and "ohne Text" in r.summary()
+    assert r.empty == ["leer.txt"] and r.added == [] and "without text" in r.summary()

@@ -1,4 +1,4 @@
-"""Zentrale Konfiguration über Umgebungsvariablen."""
+"""Central configuration via environment variables."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Config:
-    # ANNAHME: Index liegt standardmäßig in ./.myrag/chroma (im aktuellen Verzeichnis).
+    # ASSUMPTION: the index lives in ./.myrag/chroma (current directory) by default.
     db_path: Path
     llm: str  # "claude" | "ollama"
     model: str | None

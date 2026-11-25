@@ -1,4 +1,4 @@
-"""Fragen an die Dokumente stellen: passende Chunks suchen und mit Quellen beantworten."""
+"""Ask questions about the documents: find matching chunks and answer with sources."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ from dataclasses import dataclass, field
 from myrag.llm import LLM
 
 SYSTEM_PROMPT = (
-    "Du beantwortest Fragen ausschließlich anhand der mitgelieferten Auszüge aus den "
-    "Dokumenten der Person. Belege jede Aussage mit der Nummer des Auszugs in eckigen "
-    "Klammern, z.B. [1] oder [2][3]. Wenn die Auszüge die Frage nicht beantworten, sag "
-    "das offen und erfinde nichts. Antworte in der Sprache der Frage."
+    "Answer questions using only the provided excerpts from the user's documents. "
+    "Cite every statement with the number of the excerpt in square brackets, "
+    "e.g. [1] or [2][3]. If the excerpts do not answer the question, say so openly "
+    "and do not make anything up. Answer in the language of the question."
 )
 
 
@@ -23,7 +23,7 @@ class Hit:
 
     @property
     def label(self) -> str:
-        return self.source if self.chunk_index is None else f"{self.source} (Abschnitt {self.chunk_index})"
+        return self.source if self.chunk_index is None else f"{self.source} (section {self.chunk_index})"
 
 
 @dataclass
@@ -33,10 +33,10 @@ class Answer:
 
 
 def retrieve(collection, question: str, k: int = 5, embed=None) -> list[Hit]:
-    """Holt die k ähnlichsten Chunks aus einer ChromaDB-Collection.
+    """Fetch the k most similar chunks from a ChromaDB collection.
 
-    `embed` ist optional eine Funktion Text -> Vektor, falls die Collection ohne
-    eigene Embedding-Funktion angelegt wurde.
+    `embed` is an optional text -> vector function, for collections created
+    without their own embedding function.
     """
     if embed is not None:
         res = collection.query(
@@ -56,7 +56,7 @@ def retrieve(collection, question: str, k: int = 5, embed=None) -> list[Hit]:
         meta = meta or {}
         hits.append(Hit(
             text=doc,
-            source=str(meta.get("source", "unbekannt")),
+            source=str(meta.get("source", "unknown")),
             chunk_index=meta.get("chunk_index"),
             distance=dist,
         ))
@@ -64,11 +64,11 @@ def retrieve(collection, question: str, k: int = 5, embed=None) -> list[Hit]:
 
 
 def build_prompt(question: str, hits: list[Hit]) -> str:
-    parts = [f"[{i}] Quelle: {h.label}\n{h.text}" for i, h in enumerate(hits, 1)]
-    return "Auszüge:\n\n" + "\n\n---\n\n".join(parts) + f"\n\nFrage: {question}"
+    parts = [f"[{i}] Source: {h.label}\n{h.text}" for i, h in enumerate(hits, 1)]
+    return "Excerpts:\n\n" + "\n\n---\n\n".join(parts) + f"\n\nQuestion: {question}"
 
 
-EMPTY_INDEX = "Der Index ist leer. Lies zuerst einen Ordner ein: myrag ingest <ordner>"
+EMPTY_INDEX = "The index is empty. Ingest a folder first: myrag ingest <folder>"
 
 
 def ask(question: str, collection, llm: LLM, k: int = 5, embed=None) -> Answer:
@@ -76,20 +76,20 @@ def ask(question: str, collection, llm: LLM, k: int = 5, embed=None) -> Answer:
         return Answer(EMPTY_INDEX, [])
     hits = retrieve(collection, question, k=min(k, collection.count()), embed=embed)
     if not hits:
-        return Answer("Im Index wurde nichts Passendes gefunden.", [])
+        return Answer("Nothing relevant was found in the index.", [])
     return Answer(llm.generate(SYSTEM_PROMPT, build_prompt(question, hits)), hits)
 
 
 def format_answer(answer: Answer) -> str:
     if not answer.hits:
         return answer.text
-    lines = [answer.text, "", "Quellen:"]
+    lines = [answer.text, "", "Sources:"]
     lines += [f"  [{i}] {h.label}" for i, h in enumerate(answer.hits, 1)]
     return "\n".join(lines)
 
 
 def run(question: str, config, top_k: int = 5) -> int:
-    """Einstieg für `myrag ask`: sucht, fragt das Sprachmodell und gibt die Antwort aus."""
+    """Entry point for `myrag ask`: retrieves, queries the language model and prints the answer."""
     import sys
 
     from myrag import store
@@ -97,17 +97,17 @@ def run(question: str, config, top_k: int = 5) -> int:
     from myrag.llm import LLMError, get_llm
 
     if not store.index_exists(config.db_path):
-        print(f"Fehler: Kein Index unter {config.db_path}. {EMPTY_INDEX}", file=sys.stderr)
+        print(f"Error: No index at {config.db_path}. {EMPTY_INDEX}", file=sys.stderr)
         return 1
     try:
         llm = get_llm(config.llm, config.model, getattr(config, "ollama_host", None))
         collection = store.get_collection(config.db_path)
-        if collection.count() == 0:  # Embedding-Modell gar nicht erst laden
-            print(f"Fehler: {EMPTY_INDEX}", file=sys.stderr)
+        if collection.count() == 0:  # don't even load the embedding model
+            print(f"Error: {EMPTY_INDEX}", file=sys.stderr)
             return 1
         answer = ask(question, collection, llm, k=top_k, embed=get_embedder().embed_query)
     except (LLMError, RuntimeError, ValueError) as e:
-        print(f"Fehler: {e}", file=sys.stderr)
+        print(f"Error: {e}", file=sys.stderr)
         return 1
     print(format_answer(answer))
     return 0

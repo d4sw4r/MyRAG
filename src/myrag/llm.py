@@ -1,4 +1,4 @@
-"""Sprachmodell-Backends für `myrag ask`: Claude-API und Ollama, umschaltbar."""
+"""Language model backends for `myrag ask`: Claude API and Ollama, switchable."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ DEFAULT_MODELS = {
 
 
 class LLMError(RuntimeError):
-    """Verständliche Fehlermeldung für die Kommandozeile."""
+    """Readable error message for the command line."""
 
 
 def _has_anthropic_credentials() -> bool:
@@ -43,9 +43,9 @@ class ClaudeLLM:
         if client is None:
             if not _has_anthropic_credentials():
                 raise LLMError(
-                    "Kein Claude-API-Schlüssel gefunden. Setze ANTHROPIC_API_KEY "
-                    "(Schlüssel unter https://platform.claude.com/settings/keys) "
-                    "oder nutze ein lokales Modell mit MYRAG_LLM=ollama."
+                    "No Claude API key found. Set ANTHROPIC_API_KEY "
+                    "(get a key at https://platform.claude.com/settings/keys) "
+                    "or use a local model with MYRAG_LLM=ollama."
                 )
             import anthropic
 
@@ -58,17 +58,17 @@ class ClaudeLLM:
         try:
             return self._generate(system, prompt)
         except anthropic.AuthenticationError as e:
-            raise LLMError("Der Claude-API-Schlüssel ist ungültig. Prüfe ANTHROPIC_API_KEY.") from e
+            raise LLMError("The Claude API key is invalid. Check ANTHROPIC_API_KEY.") from e
         except anthropic.PermissionDeniedError as e:
-            raise LLMError(f"Kein Zugriff auf das Modell {self.model}: {e.message}") from e
+            raise LLMError(f"No access to model {self.model}: {e.message}") from e
         except anthropic.NotFoundError as e:
-            raise LLMError(f"Modell {self.model} nicht gefunden. Prüfe MYRAG_MODEL.") from e
+            raise LLMError(f"Model {self.model} not found. Check MYRAG_MODEL.") from e
         except anthropic.RateLimitError as e:
-            raise LLMError("Rate-Limit der Claude-API erreicht. Bitte kurz warten und erneut fragen.") from e
+            raise LLMError("Claude API rate limit reached. Please wait a moment and ask again.") from e
         except anthropic.APIStatusError as e:
-            raise LLMError(f"Claude-API-Fehler ({e.status_code}): {e.message}") from e
+            raise LLMError(f"Claude API error ({e.status_code}): {e.message}") from e
         except anthropic.APIConnectionError as e:
-            raise LLMError("Claude-API nicht erreichbar. Besteht eine Internetverbindung?") from e
+            raise LLMError("Claude API unreachable. Is there an internet connection?") from e
 
     def _generate(self, system: str, prompt: str) -> str:
         with self.client.beta.messages.stream(
@@ -78,13 +78,13 @@ class ClaudeLLM:
             messages=[{"role": "user", "content": prompt}],
             thinking={"type": "adaptive"},
             output_config={"effort": "medium"},
-            # Bei einer Ablehnung des Modells übernimmt automatisch ein Ersatzmodell.
+            # If the model refuses, a fallback model takes over automatically.
             betas=["server-side-fallback-2026-07-01"],
             fallbacks="default",
         ) as stream:
             message = stream.get_final_message()
         if message.stop_reason == "refusal":
-            raise LLMError("Das Modell hat die Anfrage abgelehnt.")
+            raise LLMError("The model refused the request.")
         return "".join(b.text for b in message.content if b.type == "text").strip()
 
 
@@ -113,22 +113,22 @@ class OllamaLLM:
             )
         except httpx.ConnectError as e:
             raise LLMError(
-                f"Ollama ist unter {self.host} nicht erreichbar. Läuft `ollama serve`?"
+                f"Ollama is not reachable at {self.host}. Is `ollama serve` running?"
             ) from e
         if resp.status_code == 404:
             raise LLMError(
-                f"Ollama-Modell '{self.model}' nicht gefunden. Lade es mit `ollama pull {self.model}`."
+                f"Ollama model '{self.model}' not found. Download it with `ollama pull {self.model}`."
             )
         resp.raise_for_status()
         return resp.json()["message"]["content"].strip()
 
 
 def get_llm(backend: str | None = None, model: str | None = None, ollama_host: str | None = None) -> LLM:
-    """Wählt das Backend: Argument > MYRAG_LLM > Standard (Claude)."""
+    """Select the backend: argument > MYRAG_LLM > default (Claude)."""
     backend = (backend or os.environ.get("MYRAG_LLM") or DEFAULT_BACKEND).lower()
     model = model or os.environ.get("MYRAG_MODEL") or None
     if backend == "claude":
         return ClaudeLLM(model=model)
     if backend == "ollama":
         return OllamaLLM(model=model, host=ollama_host)
-    raise ValueError(f"Unbekanntes LLM-Backend '{backend}'. Erlaubt: claude, ollama")
+    raise ValueError(f"Unknown LLM backend '{backend}'. Allowed: claude, ollama")

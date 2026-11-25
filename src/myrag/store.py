@@ -1,13 +1,13 @@
-"""ChromaDB-Zugriff. Schema pro Chunk:
+"""ChromaDB access. Schema per chunk:
 
     id        = "<root_key>:<source>::<chunk_index>"
-    document  = Chunk-Text
-    metadata  = {source: relativer POSIX-Pfad, root: absoluter Ordnerpfad,
-                 chunk_index: int, file_hash: sha256-hex}
+    document  = chunk text
+    metadata  = {source: relative POSIX path, root: absolute folder path,
+                 chunk_index: int, file_hash: sha256 hex}
 
-Mehrere Ordner können im selben Index liegen; `root` trennt sie. Die Collection
-hat keine eigene embedding_function; Embeddings werden immer explizit übergeben
-(bei Abfragen: query_embeddings=...).
+Several folders can share one index; `root` separates them. The collection has
+no embedding_function of its own; embeddings are always passed explicitly
+(for queries: query_embeddings=...).
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ def index_exists(db_path: str | Path | None = None) -> bool:
 
 
 def reset(db_path: str | Path | None = None) -> bool:
-    """Löscht den kompletten Index. Gibt True zurück, wenn etwas gelöscht wurde."""
+    """Delete the entire index. Returns True if anything was deleted."""
     path = Path(db_path) if db_path is not None else db_path_from_env()
     if not path.exists():
         return False
@@ -91,7 +91,7 @@ def iter_metadatas(collection, root: str | None = None):
 
 
 def indexed_files(collection, root: str | None = None) -> dict[str, str]:
-    """Liefert {source: file_hash} der indexierten Dateien (optional nur eines Ordners)."""
+    """Return {source: file_hash} of the indexed files (optionally of one folder only)."""
     return {
         m["source"]: m.get("file_hash", "")
         for m in iter_metadatas(collection, root)
@@ -100,11 +100,11 @@ def indexed_files(collection, root: str | None = None) -> dict[str, str]:
 
 
 def stats(collection) -> dict[str, dict[str, int]]:
-    """{ordner: {"files": n, "chunks": m}} über den ganzen Index."""
+    """{folder: {"files": n, "chunks": m}} across the whole index."""
     files: dict[str, set[str]] = {}
     chunks: dict[str, int] = {}
     for m in iter_metadatas(collection):
-        root = m.get("root", "(unbekannt)")
+        root = m.get("root", "(unknown)")
         files.setdefault(root, set()).add(m.get("source", ""))
         chunks[root] = chunks.get(root, 0) + 1
     return {r: {"files": len(files[r]), "chunks": chunks[r]} for r in sorted(files)}

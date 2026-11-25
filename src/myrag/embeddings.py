@@ -1,7 +1,7 @@
-"""Gemeinsames Embedding-Modul für ingest und ask.
+"""Shared embedding module for ingest and ask.
 
-Beide Seiten müssen dasselbe Modell nutzen, sonst passen die Vektoren nicht
-zusammen. Das Modell lässt sich per MYRAG_EMBED_MODEL überschreiben.
+Both sides must use the same model, otherwise the vectors don't match.
+The model can be overridden with MYRAG_EMBED_MODEL.
 """
 
 from __future__ import annotations
@@ -22,10 +22,10 @@ class Embedder(Protocol):
 
 
 class SentenceTransformerEmbedder:
-    """Lokale Embeddings mit sentence-transformers (läuft offline nach dem ersten Download)."""
+    """Local embeddings with sentence-transformers (runs offline after the first download)."""
 
     def __init__(self, model_name: str = DEFAULT_MODEL, batch_size: int = 32):
-        from sentence_transformers import SentenceTransformer  # lazy: schwerer Import
+        from sentence_transformers import SentenceTransformer  # lazy: heavy import
 
         self.model_name = model_name
         self.batch_size = batch_size

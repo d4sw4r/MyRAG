@@ -34,13 +34,13 @@ def test_status_and_reset(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("MYRAG_DB_PATH", str(db))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
     assert main(["status"]) == 0
-    assert "noch leer" in capsys.readouterr().out
+    assert "still empty" in capsys.readouterr().out
 
     col = store.get_collection(db)
     store.add_chunks(col, "a.md", "h", ["x", "y"], [[1.0, 0.0], [0.0, 1.0]], root="/docs")
     assert main(["status"]) == 0
     out = capsys.readouterr().out
-    assert "1 Dateien, 2 Chunks" in out and "/docs" in out and "gefunden" in out
+    assert "1 file(s), 2 chunk(s)" in out and "/docs" in out and "found" in out
 
     assert main(["reset", "--yes"]) == 0
     assert not db.exists()
