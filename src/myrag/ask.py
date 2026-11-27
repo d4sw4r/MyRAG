@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from myrag.llm import LLM
+from myrag.retrieval import Hit, Retriever, retrieve  # noqa: F401  (re-exported)
 
 SYSTEM_PROMPT = (
     "Answer questions using only the provided excerpts from the user's documents. "
@@ -15,52 +16,9 @@ SYSTEM_PROMPT = (
 
 
 @dataclass
-class Hit:
-    text: str
-    source: str
-    chunk_index: int | None = None
-    distance: float | None = None
-
-    @property
-    def label(self) -> str:
-        return self.source if self.chunk_index is None else f"{self.source} (section {self.chunk_index})"
-
-
-@dataclass
 class Answer:
     text: str
     hits: list[Hit] = field(default_factory=list)
-
-
-def retrieve(collection, question: str, k: int = 5, embed=None) -> list[Hit]:
-    """Fetch the k most similar chunks from a ChromaDB collection.
-
-    `embed` is an optional text -> vector function, for collections created
-    without their own embedding function.
-    """
-    if embed is not None:
-        res = collection.query(
-            query_embeddings=[embed(question)], n_results=k,
-            include=["documents", "metadatas", "distances"],
-        )
-    else:
-        res = collection.query(
-            query_texts=[question], n_results=k,
-            include=["documents", "metadatas", "distances"],
-        )
-    docs = (res.get("documents") or [[]])[0]
-    metas = (res.get("metadatas") or [[]])[0]
-    dists = (res.get("distances") or [[]])[0] or [None] * len(docs)
-    hits = []
-    for doc, meta, dist in zip(docs, metas, dists):
-        meta = meta or {}
-        hits.append(Hit(
-            text=doc,
-            source=str(meta.get("source", "unknown")),
-            chunk_index=meta.get("chunk_index"),
-            distance=dist,
-        ))
-    return hits
 
 
 def build_prompt(question: str, hits: list[Hit]) -> str:
@@ -69,45 +27,82 @@ def build_prompt(question: str, hits: list[Hit]) -> str:
 
 
 EMPTY_INDEX = "The index is empty. Ingest a folder first: myrag ingest <folder>"
+NOTHING_FOUND = (
+    "Nothing relevant was found in the index for this question. "
+    "Try other words, or check with `myrag search` what the index contains."
+)
 
 
-def ask(question: str, collection, llm: LLM, k: int = 5, embed=None) -> Answer:
+def ask(question: str, collection, llm: LLM, k: int = 5, embed=None,
+        retriever: Retriever | None = None) -> Answer:
     if collection.count() == 0:
         return Answer(EMPTY_INDEX, [])
-    hits = retrieve(collection, question, k=min(k, collection.count()), embed=embed)
+    retriever = retriever or Retriever(collection, embed)
+    hits = retriever.search(question, k=k)
     if not hits:
-        return Answer("Nothing relevant was found in the index.", [])
+        return Answer(NOTHING_FOUND, [])
     return Answer(llm.generate(SYSTEM_PROMPT, build_prompt(question, hits)), hits)
+
+
+def format_sources(hits: list[Hit]) -> str:
+    return "\n".join(["Sources:"] + [f"  [{i}] {h.label}" for i, h in enumerate(hits, 1)])
 
 
 def format_answer(answer: Answer) -> str:
     if not answer.hits:
         return answer.text
-    lines = [answer.text, "", "Sources:"]
-    lines += [f"  [{i}] {h.label}" for i, h in enumerate(answer.hits, 1)]
-    return "\n".join(lines)
+    return f"{answer.text}\n\n{format_sources(answer.hits)}"
+
+
+def stream_answer(llm: LLM, system: str, messages: list[dict], out) -> str:
+    """Print the answer while it is generated; returns the full text.
+
+    Falls back to a single call for backends without streaming.
+    """
+    if not hasattr(llm, "stream"):
+        text = llm.chat(system, messages) if hasattr(llm, "chat") else llm.generate(system, messages[-1]["content"])
+        print(text, file=out)
+        return text
+    parts = []
+    for piece in llm.stream(system, messages):
+        parts.append(piece)
+        print(piece, end="", file=out, flush=True)
+    print(file=out)
+    return "".join(parts).strip()
+
+
+def open_index(config):
+    """Open the collection for ask/search/chat. Raises ValueError with a readable message."""
+    from myrag import store
+
+    if not store.index_exists(config.db_path):
+        raise ValueError(f"No index at {config.db_path}. {EMPTY_INDEX}")
+    collection = store.get_collection(config.db_path)
+    if collection.count() == 0:
+        raise ValueError(EMPTY_INDEX)
+    return collection
 
 
 def run(question: str, config, top_k: int = 5) -> int:
     """Entry point for `myrag ask`: retrieves, queries the language model and prints the answer."""
     import sys
 
-    from myrag import store
-    from myrag.embeddings import get_embedder
+    from myrag import retrieval
     from myrag.llm import LLMError, get_llm
 
-    if not store.index_exists(config.db_path):
-        print(f"Error: No index at {config.db_path}. {EMPTY_INDEX}", file=sys.stderr)
-        return 1
     try:
         llm = get_llm(config.llm, config.model, getattr(config, "ollama_host", None))
-        collection = store.get_collection(config.db_path)
-        if collection.count() == 0:  # don't even load the embedding model
-            print(f"Error: {EMPTY_INDEX}", file=sys.stderr)
-            return 1
-        answer = ask(question, collection, llm, k=top_k, embed=get_embedder().embed_query)
+        collection = open_index(config)  # before loading any model
+        retriever = retrieval.from_config(config, collection)
+        hits = retriever.search(question, k=top_k)
+        if not hits:
+            print(NOTHING_FOUND)
+            return 0
+        prompt = build_prompt(question, hits)
+        stream_answer(llm, SYSTEM_PROMPT, [{"role": "user", "content": prompt}], sys.stdout)
     except (LLMError, RuntimeError, ValueError) as e:
-        print(f"Error: {e}", file=sys.stderr)
+        print(f"\nError: {e}", file=sys.stderr)
         return 1
-    print(format_answer(answer))
+    print()
+    print(format_sources(hits))
     return 0

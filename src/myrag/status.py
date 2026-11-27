@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from . import store
 from .embeddings import model_name_from_env
+from .retrieval import RetrievalSettings
 from .llm import DEFAULT_MODELS, _has_anthropic_credentials
 
 
 def run(config) -> int:
     print(f"Index:            {config.db_path.resolve()}")
     print(f"Embedding model:  {model_name_from_env()}")
+    settings = RetrievalSettings.from_env()
+    search = "hybrid (vector + keywords)" if settings.hybrid else "vector only"
+    rerank = f"reranking with {settings.rerank_model}" if settings.rerank else "no reranking"
+    print(f"Search:           {search}, {rerank}")
     model = config.model or DEFAULT_MODELS.get(config.llm, "?")
     line = f"Language model:   {config.llm} ({model})"
     if config.llm == "claude":
@@ -21,7 +26,11 @@ def run(config) -> int:
     if not store.index_exists(config.db_path):
         print("\nThe index is still empty. Start with: myrag ingest <folder>")
         return 0
-    stats = store.stats(store.get_collection(config.db_path))
+    collection = store.get_collection(config.db_path)
+    index_model = store.index_embed_model(collection, config.db_path)
+    if index_model and index_model != model_name_from_env():
+        print(f"\nWarning: {store.model_mismatch_message(index_model, model_name_from_env())}")
+    stats = store.stats(collection)
     if not stats:
         print("\nThe index is still empty. Start with: myrag ingest <folder>")
         return 0

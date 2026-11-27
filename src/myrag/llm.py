@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
-from typing import Protocol
+from contextlib import contextmanager
+from typing import Iterator, Protocol
 
 import httpx
 
@@ -27,11 +29,39 @@ def _has_anthropic_credentials() -> bool:
     return os.path.isdir(os.path.join(config_home, "anthropic"))
 
 
+Message = dict  # {"role": "user" | "assistant", "content": str}
+
+
 class LLM(Protocol):
     name: str
     model: str
 
     def generate(self, system: str, prompt: str) -> str: ...
+
+    def chat(self, system: str, messages: list[Message]) -> str: ...
+
+    def stream(self, system: str, messages: list[Message]) -> Iterator[str]: ...
+
+
+@contextmanager
+def _claude_errors(model: str):
+    """Translate Anthropic SDK errors into readable LLMErrors."""
+    import anthropic
+
+    try:
+        yield
+    except anthropic.AuthenticationError as e:
+        raise LLMError("The Claude API key is invalid. Check ANTHROPIC_API_KEY.") from e
+    except anthropic.PermissionDeniedError as e:
+        raise LLMError(f"No access to the model {model}: {e.message}") from e
+    except anthropic.NotFoundError as e:
+        raise LLMError(f"Model {model} not found. Check MYRAG_MODEL.") from e
+    except anthropic.RateLimitError as e:
+        raise LLMError("Claude API rate limit reached. Please wait a moment and ask again.") from e
+    except anthropic.APIStatusError as e:
+        raise LLMError(f"Claude API error ({e.status_code}): {e.message}") from e
+    except anthropic.APIConnectionError as e:
+        raise LLMError("Claude API is not reachable. Is there an internet connection?") from e
 
 
 class ClaudeLLM:
@@ -52,40 +82,41 @@ class ClaudeLLM:
             client = anthropic.Anthropic()
         self.client = client
 
-    def generate(self, system: str, prompt: str) -> str:
-        import anthropic
-
-        try:
-            return self._generate(system, prompt)
-        except anthropic.AuthenticationError as e:
-            raise LLMError("The Claude API key is invalid. Check ANTHROPIC_API_KEY.") from e
-        except anthropic.PermissionDeniedError as e:
-            raise LLMError(f"No access to model {self.model}: {e.message}") from e
-        except anthropic.NotFoundError as e:
-            raise LLMError(f"Model {self.model} not found. Check MYRAG_MODEL.") from e
-        except anthropic.RateLimitError as e:
-            raise LLMError("Claude API rate limit reached. Please wait a moment and ask again.") from e
-        except anthropic.APIStatusError as e:
-            raise LLMError(f"Claude API error ({e.status_code}): {e.message}") from e
-        except anthropic.APIConnectionError as e:
-            raise LLMError("Claude API unreachable. Is there an internet connection?") from e
-
-    def _generate(self, system: str, prompt: str) -> str:
-        with self.client.beta.messages.stream(
+    def _open_stream(self, system: str, messages: list[Message]):
+        return self.client.beta.messages.stream(
             model=self.model,
             max_tokens=self.max_tokens,
             system=system,
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             thinking={"type": "adaptive"},
             output_config={"effort": "medium"},
-            # If the model refuses, a fallback model takes over automatically.
+            # If the model declines, a fallback model takes over automatically.
             betas=["server-side-fallback-2026-07-01"],
             fallbacks="default",
-        ) as stream:
-            message = stream.get_final_message()
+        )
+
+    @staticmethod
+    def _check(message) -> None:
         if message.stop_reason == "refusal":
-            raise LLMError("The model refused the request.")
+            raise LLMError("The model declined the request.")
+
+    def generate(self, system: str, prompt: str) -> str:
+        return self.chat(system, [{"role": "user", "content": prompt}])
+
+    def chat(self, system: str, messages: list[Message]) -> str:
+        with _claude_errors(self.model):
+            with self._open_stream(system, messages) as stream:
+                message = stream.get_final_message()
+        self._check(message)
         return "".join(b.text for b in message.content if b.type == "text").strip()
+
+    def stream(self, system: str, messages: list[Message]) -> Iterator[str]:
+        """Yield the answer text piece by piece as it is generated."""
+        with _claude_errors(self.model):
+            with self._open_stream(system, messages) as stream:
+                yield from stream.text_stream
+                message = stream.get_final_message()
+        self._check(message)
 
 
 class OllamaLLM:
@@ -98,29 +129,53 @@ class OllamaLLM:
             self.host = "http://" + self.host
         self.client = client or httpx.Client(timeout=600)
 
-    def generate(self, system: str, prompt: str) -> str:
-        try:
-            resp = self.client.post(
-                f"{self.host}/api/chat",
-                json={
-                    "model": self.model,
-                    "stream": False,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": prompt},
-                    ],
-                },
-            )
-        except httpx.ConnectError as e:
-            raise LLMError(
-                f"Ollama is not reachable at {self.host}. Is `ollama serve` running?"
-            ) from e
+    def _payload(self, system: str, messages: list[Message], stream: bool) -> dict:
+        return {
+            "model": self.model,
+            "stream": stream,
+            "messages": [{"role": "system", "content": system}, *messages],
+        }
+
+    def _not_reachable(self, e: Exception) -> LLMError:
+        return LLMError(f"Ollama is not reachable at {self.host}. Is `ollama serve` running?")
+
+    def _check_status(self, resp: httpx.Response) -> None:
         if resp.status_code == 404:
             raise LLMError(
                 f"Ollama model '{self.model}' not found. Download it with `ollama pull {self.model}`."
             )
         resp.raise_for_status()
+
+    def generate(self, system: str, prompt: str) -> str:
+        return self.chat(system, [{"role": "user", "content": prompt}])
+
+    def chat(self, system: str, messages: list[Message]) -> str:
+        try:
+            resp = self.client.post(f"{self.host}/api/chat", json=self._payload(system, messages, False))
+        except httpx.ConnectError as e:
+            raise self._not_reachable(e) from e
+        self._check_status(resp)
         return resp.json()["message"]["content"].strip()
+
+    def stream(self, system: str, messages: list[Message]) -> Iterator[str]:
+        try:
+            with self.client.stream(
+                "POST", f"{self.host}/api/chat", json=self._payload(system, messages, True)
+            ) as resp:
+                if resp.status_code >= 400:
+                    resp.read()
+                self._check_status(resp)
+                for line in resp.iter_lines():
+                    if not line.strip():
+                        continue
+                    data = json.loads(line)
+                    piece = (data.get("message") or {}).get("content")
+                    if piece:
+                        yield piece
+                    if data.get("done"):
+                        return
+        except httpx.ConnectError as e:
+            raise self._not_reachable(e) from e
 
 
 def get_llm(backend: str | None = None, model: str | None = None, ollama_host: str | None = None) -> LLM:

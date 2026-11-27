@@ -144,6 +144,8 @@ def test_run_uses_store_and_embedder(tmp_path, monkeypatch, capsys):
     texts = ["Katzen schlafen viel", "Rezept für Pizza mit Tomaten"]
     for i, t in enumerate(texts):
         store.add_chunks(col, f"notes/{i}.md", "h", [t], [vec(t)], root="/docs")
+    from myrag.embeddings import model_name_from_env
+    store.write_index_info({"embed_model": model_name_from_env()}, tmp_path / "db")
     _patch_embedder(monkeypatch)
     monkeypatch.setattr("myrag.llm.get_llm", lambda *a: FakeLLM())
     cfg = types.SimpleNamespace(db_path=tmp_path / "db", llm="claude", model=None, ollama_host=None)

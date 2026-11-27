@@ -141,3 +141,59 @@ def test_empty_file_reported(tmp_path: Path):
     (docs / "leer.txt").write_text("   ")
     r = ingest_folder(docs, store.get_collection(tmp_path / "db"), FakeEmbedder())
     assert r.empty == ["leer.txt"] and r.added == [] and "without text" in r.summary()
+
+
+def test_chunk_settings_change_reprocesses(tmp_path: Path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "a.txt").write_text("Satz. " * 300)
+    col = store.get_collection(tmp_path / "db")
+    emb = FakeEmbedder()
+    ingest_folder(docs, col, emb, chunk_size=300, overlap=50)
+    assert ingest_folder(docs, col, emb, chunk_size=300, overlap=50).unchanged == ["a.txt"]
+    r = ingest_folder(docs, col, emb, chunk_size=600, overlap=100)
+    assert r.updated == ["a.txt"]
+    assert col.get(include=["metadatas"])["metadatas"][0]["chunking"] == "600/100"
+
+
+def _patch_embedder(monkeypatch):
+    monkeypatch.setattr("myrag.embeddings.get_embedder", lambda *a: FakeEmbedder())
+
+
+def test_ingest_run_writes_model_and_refuses_mismatch(tmp_path, monkeypatch, capsys):
+    from myrag.cli import main
+
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "a.txt").write_text("Hallo")
+    db = tmp_path / "db"
+    monkeypatch.setenv("MYRAG_DB_PATH", str(db))
+    _patch_embedder(monkeypatch)
+    assert main(["ingest", str(docs)]) == 0
+    assert store.read_index_info(db)["embed_model"] == "intfloat/multilingual-e5-small"
+
+    monkeypatch.setenv("MYRAG_EMBED_MODEL", "other-model")
+    assert main(["ingest", str(docs)]) == 1
+    assert "--rebuild" in capsys.readouterr().err
+
+
+def test_rebuild_reingests_all_folders(tmp_path, monkeypatch):
+    from myrag.cli import main
+
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir(); b.mkdir()
+    (a / "x.txt").write_text("Ordner A")
+    (b / "y.txt").write_text("Ordner B")
+    db = tmp_path / "db"
+    col = store.get_collection(db)
+    emb = FakeEmbedder()
+    ingest_folder(a, col, emb)
+    ingest_folder(b, col, emb)  # v0.1 index: no info file -> legacy model
+
+    monkeypatch.setenv("MYRAG_DB_PATH", str(db))
+    _patch_embedder(monkeypatch)
+    assert main(["ingest", str(a)]) == 1  # mismatch with the new default model
+    assert main(["ingest", "--rebuild", str(a)]) == 0
+    col = store.get_collection(db)
+    assert sorted(col.get()["documents"]) == ["Ordner A", "Ordner B"]
+    assert store.read_index_info(db)["embed_model"] == "intfloat/multilingual-e5-small"
